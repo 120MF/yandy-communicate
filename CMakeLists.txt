@@ -1,0 +1,5 @@
+if(CONFIG_YANDY_COMMUNICATE)
+    zephyr_library()
+    zephyr_library_sources(src/YandyCommunicateNode.cpp)
+    zephyr_include_directories(include)
+endif()

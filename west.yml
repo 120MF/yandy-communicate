@@ -1,0 +1,33 @@
+manifest:
+  remotes:
+    - name: zephyrproject-rtos
+      url-base: https://github.com/zephyrproject-rtos
+    - name: robomaster-dlmu
+      url-base: https://github.com/RoboMaster-DLMU-CONE
+    - name: origin
+      url-base: yandy-communicate
+
+  projects:
+    - name: zephyr
+      remote: zephyrproject-rtos
+      revision: main
+      import:
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - hal_stm32
+
+    - name: one-framework
+      remote: robomaster-dlmu
+      revision: main
+      path: modules/lib/one-framework
+      import: true
+
+
+    - name: yandy-communicate
+      url: yandy-communicate
+      path: modules/lib/nodes/yandy-communicate
+      revision: main
+
+  self:
+    path: yandy-communicate

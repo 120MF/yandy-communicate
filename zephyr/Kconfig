@@ -1,0 +1,13 @@
+config YANDY_COMMUNICATE
+    bool "yandy-communicate node for OneFramework"
+    depends on ONE_FRAMEWORK
+    help
+      Enable yandy-communicate node.
+
+if YANDY_COMMUNICATE
+
+module = YANDY_COMMUNICATE
+module-str = YANDY_COMMUNICATE
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # YANDY_COMMUNICATE

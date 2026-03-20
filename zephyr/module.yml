@@ -1,0 +1,4 @@
+name: yandy-communicate
+build:
+  cmake: .
+  kconfig: zephyr/Kconfig
