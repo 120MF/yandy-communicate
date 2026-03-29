@@ -1,5 +1,6 @@
 config YANDY_COMMUNICATE
     bool "yandy-communicate node for OneFramework"
+    select IMU_HUB
     select COMM_BRIDGE
     select BOARD_DJI_BOARD_C_USB_COMM
     depends on YANDY_GIMBAL
