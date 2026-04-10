@@ -54,6 +54,7 @@ void YandyCommunicateNode::run()
         }
 
         auto remote = remote_result.value();
+        const float wheel = -vt_stick_percent(remote.wheel());
 
         bool use_custom_controller = false;
         // Get gimbal data
@@ -90,6 +91,9 @@ void YandyCommunicateNode::run()
         // Process keyboard commands (always active)
         m_packet.cmd = processKeyboardCmd(remote);
 
+        bool special_pos_triggered = false;
+
+
         if (remote.switch_state() == 2)
         {
             if (remote.key_shift() && remote.key_c())
@@ -117,6 +121,30 @@ void YandyCommunicateNode::run()
             {
                 // Remote control mode: accumulate 6-axis values
                 processRemoteControl(remote);
+                if (remote.custom_right())
+                {
+                    m_accum_x = 0.25;
+                    m_accum_y = -0.05;
+                    m_accum_z = 0.7;
+                    m_accum_qx = 0.53;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                    m_accum_qy = -0.21;
+                    m_accum_qz = 0.8;
+                    m_accum_qw = -0.21;
+                }
 
                 m_packet.x = m_accum_x;
                 m_packet.y = m_accum_y;
@@ -126,15 +154,7 @@ void YandyCommunicateNode::run()
                 m_packet.qy = m_accum_qy;
                 m_packet.qz = m_accum_qz;
 
-                if (remote.custom_left())
-                {
-                    m_packet.cmd = YandyControlCmd::CMD_SWITCH_STORE;
-                }
-                else if (remote.custom_right())
-                {
-                    m_packet.cmd = YandyControlCmd::CMD_SWITCH_FETCH;
-                }
-                else if (remote.trigger())
+                if (remote.trigger())
                 {
                     m_packet.cmd = YandyControlCmd::CMD_SWITCH_ENABLE;
                 }
@@ -149,30 +169,32 @@ void YandyCommunicateNode::run()
                     std::memcpy(&m_packet.x, controller_result.value().data, sizeof(YandyControllerPacket));
                 }
             }
+            LOG_INF("%.2f, %.2f, %.2f; %.2f, %.2f, %.2f, %.2f", m_accum_x, m_accum_y, m_accum_z, m_accum_qx, m_accum_qy,
+                    m_accum_qz, m_accum_qw);
         }
-
         else if (remote.switch_state() == 1)
         {
-            if (remote.custom_left())
+            if (remote.pause_btn())
             {
-                m_packet.cmd = YandyControlCmd::CMD_INC_STORE;
+                m_packet.cmd = YandyControlCmd::CMD_TOGGLE_HELD;
+            }
+            else if (remote.custom_left())
+            {
+                m_packet.cmd = YandyControlCmd::CMD_DEC_STORE;
             }
             else if (remote.custom_right())
             {
-                m_packet.cmd = YandyControlCmd::CMD_DEC_STORE;
+                m_packet.cmd = YandyControlCmd::CMD_INC_STORE;
             }
             else if (remote.trigger())
             {
                 m_packet.cmd = YandyControlCmd::CMD_SWITCH_GRIP;
             }
-            else if (remote.pause_btn())
-            {
-                m_packet.cmd = YandyControlCmd::CMD_TOGGLE_HELD;
-            }
         }
 
         else if (remote.switch_state() == 0)
         {
+            // 1. Handle Trigger Reset and Special Positions (Highest Priority in State 0)
             if (remote.trigger())
             {
                 m_accum_x = m_init_x;
@@ -182,8 +204,117 @@ void YandyCommunicateNode::run()
                 m_accum_qx = m_init_qx;
                 m_accum_qy = m_init_qy;
                 m_accum_qz = m_init_qz;
+                special_pos_triggered = true;
+            }
+            else if (remote.pause_btn())
+            {
+                m_accum_x = 0.25f;
+                m_accum_y = -0.11f;
+                m_accum_z = 0.75f;
+                m_accum_qw = 0.0f;
+                m_accum_qx = -0.07f;
+                m_accum_qy = 0.0f;
+                m_accum_qz = 1.0f;
+                special_pos_triggered = true;
+            }
+            else if (remote.custom_left())
+            {
+                m_accum_x = 0.32f;
+                m_accum_y = 0.11f;
+                m_accum_z = 0.48f;
+                m_accum_qw = 0.66f;
+                m_accum_qx = 0.27f;
+                m_accum_qy = 0.61f;
+                m_accum_qz = 0.33f;
+                special_pos_triggered = true;
+            }
+            else if (remote.custom_right())
+            {
+                m_accum_x = 0.37f;
+                m_accum_y = -0.15f;
+                m_accum_z = 0.50f;
+                m_accum_qw = 0.53f;
+                m_accum_qx = -0.37f;
+                m_accum_qy = 0.73f;
+                m_accum_qz = -0.23f;
+                special_pos_triggered = true;
+            }
+
+            if (special_pos_triggered)
+            {
+                m_packet.x = m_accum_x;
+                m_packet.y = m_accum_y;
+                m_packet.z = m_accum_z;
+                m_packet.qw = m_accum_qw;
+                m_packet.qx = m_accum_qx;
+                m_packet.qy = m_accum_qy;
+                m_packet.qz = m_accum_qz;
+
+                m_playback_cursor = -2; // Special value: "Reset/Manual state", don't auto-grab history
+            }
+            // 2. Handle History Playback via Wheel
+            else if (m_recorded_count > 0)
+            {
+                // Wheel Flick Left (wheel--): Step back 0.5s
+                if (wheel < -0.5f && m_prev_wheel >= -0.5f)
+                {
+                    if (m_playback_cursor < 0)
+                    {
+                        // First time or after trigger/special: start from latest
+                        m_playback_cursor = (m_history_head - 1 + HISTORY_SIZE) % HISTORY_SIZE;
+                    }
+                    else
+                    {
+                        // Step back 125 frames (0.5s)
+                        m_playback_cursor = (m_playback_cursor - 125 + HISTORY_SIZE) % HISTORY_SIZE;
+                    }
+                }
+                // Wheel Flick Right (wheel++): Jump to latest
+                else if (wheel > 0.5f && m_prev_wheel <= 0.5f)
+                {
+                    m_playback_cursor = (m_history_head - 1 + HISTORY_SIZE) % HISTORY_SIZE;
+                }
+
+                // If cursor is active, apply the frame
+                if (m_playback_cursor >= 0)
+                {
+                    const auto& frame = m_history_buffer[m_playback_cursor];
+                    m_accum_x = frame.x;
+                    m_accum_y = frame.y;
+                    m_accum_z = frame.z;
+                    m_accum_qw = frame.qw;
+                    m_accum_qx = frame.qx;
+                    m_accum_qy = frame.qy;
+                    m_accum_qz = frame.qz;
+
+                    m_packet.x = m_accum_x;
+                    m_packet.y = m_accum_y;
+                    m_packet.z = m_accum_z;
+                    m_packet.qw = m_accum_qw;
+                    m_packet.qx = m_accum_qx;
+                    m_packet.qy = m_accum_qy;
+                    m_packet.qz = m_accum_qz;
+                }
             }
         }
+
+        // Record history if not in playback mode (switch_state != 0)
+        if (remote.switch_state() != 0)
+        {
+            m_history_buffer[m_history_head] = {
+                m_accum_x, m_accum_y, m_accum_z,
+                m_accum_qw, m_accum_qx, m_accum_qy, m_accum_qz
+            };
+            m_history_head = (m_history_head + 1) % HISTORY_SIZE;
+            if (m_recorded_count < HISTORY_SIZE)
+            {
+                m_recorded_count++;
+            }
+            m_playback_cursor = -1;
+        }
+
+        m_prev_wheel = wheel;
+
         // Send the packet
 
         m_bridge->send(m_packet);
@@ -194,7 +325,8 @@ void YandyCommunicateNode::cleanup()
 {
 }
 
-void YandyCommunicateNode::eulerToQuaternion(float roll, float pitch, float yaw, float& qw, float& qx, float& qy, float& qz)
+void YandyCommunicateNode::eulerToQuaternion(float roll, float pitch, float yaw, float& qw, float& qx, float& qy,
+                                             float& qz)
 {
     float cy = std::cos(yaw * 0.5f);
     float sy = std::sin(yaw * 0.5f);
@@ -243,18 +375,18 @@ void YandyCommunicateNode::processRemoteControl(const VT03RemotePacket& remote)
     const float ry = vt_stick_percent(remote.right_stick_y());
 
     // Local angle increments
-    float d_yaw = rx * ANG_RATE;
+    float d_roll = rx * ANG_RATE;
     float d_pitch = ry * ANG_RATE;
-    float d_roll = 0.0f;
+    float d_yaw = 0.0f;
     float dx_local_input = 0.0f;
 
     if (remote.pause_btn())
     {
-        d_roll = wheel * ANG_RATE;
+        d_yaw = wheel * ANG_RATE;
     }
     else
     {
-        dx_local_input = wheel; // Wheel controls local Z-axis (forward/backward)
+        dx_local_input = wheel;
     }
 
     // Convert local angle increments to delta quaternion
@@ -262,14 +394,13 @@ void YandyCommunicateNode::processRemoteControl(const VT03RemotePacket& remote)
     eulerToQuaternion(d_roll, d_pitch, d_yaw, dq_w, dq_x, dq_y, dq_z);
 
     // Accumulate orientation: new_Q = old_Q * delta_Q (local rotation)
-    // To rotate locally, delta_Q must be on the right
     float new_qw, new_qx, new_qy, new_qz;
     multiplyQuaternion(m_accum_qw, m_accum_qx, m_accum_qy, m_accum_qz,
                        dq_w, dq_x, dq_y, dq_z,
                        new_qw, new_qx, new_qy, new_qz);
 
     // Normalize quaternion to prevent drift
-    float mag = std::sqrt(new_qw*new_qw + new_qx*new_qx + new_qy*new_qy + new_qz*new_qz);
+    float mag = std::sqrt(new_qw * new_qw + new_qx * new_qx + new_qy * new_qy + new_qz * new_qz);
     if (mag > 0.0001f)
     {
         m_accum_qw = new_qw / mag;
@@ -279,18 +410,32 @@ void YandyCommunicateNode::processRemoteControl(const VT03RemotePacket& remote)
     }
 
     // Accumulate position
-    const float dx_local = dx_local_input * POS_RATE;
-    const float dy_local = lx * POS_RATE;
-    const float dz_local = ly * POS_RATE;
+    if (remote.custom_left())
+    {
+        // Global coordinate accumulation mode
+        m_accum_x = std::clamp(m_accum_x + ly * POS_RATE, -MAX_POS[0], MAX_POS[0]);
+        m_accum_y = std::clamp(m_accum_y + lx * POS_RATE, -MAX_POS[1], MAX_POS[1]);
+        if (!remote.pause_btn())
+        {
+            m_accum_z = std::clamp(m_accum_z + wheel * POS_RATE, -MAX_POS[2], MAX_POS[2]);
+        }
+    }
+    else
+    {
+        // Local coordinate accumulation mode (Rotated)
+        const float dx_local = dx_local_input * POS_RATE;
+        const float dy_local = lx * POS_RATE;
+        const float dz_local = ly * POS_RATE;
 
-    float dx_global, dy_global, dz_global;
-    rotateVectorByQuaternion(dx_local, dy_local, dz_local,
-                             m_accum_qw, m_accum_qx, m_accum_qy, m_accum_qz,
-                             dx_global, dy_global, dz_global);
+        float dx_global, dy_global, dz_global;
+        rotateVectorByQuaternion(dx_local, dy_local, dz_local,
+                                 m_accum_qw, m_accum_qx, m_accum_qy, m_accum_qz,
+                                 dx_global, dy_global, dz_global);
 
-    m_accum_x = std::clamp(m_accum_x + dx_global, -MAX_POS[0], MAX_POS[0]);
-    m_accum_y = std::clamp(m_accum_y + dy_global, -MAX_POS[1], MAX_POS[1]);
-    m_accum_z = std::clamp(m_accum_z + dz_global, -MAX_POS[2], MAX_POS[2]);
+        m_accum_x = std::clamp(m_accum_x + dx_global, -MAX_POS[0], MAX_POS[0]);
+        m_accum_y = std::clamp(m_accum_y + dy_global, -MAX_POS[1], MAX_POS[1]);
+        m_accum_z = std::clamp(m_accum_z + dz_global, -MAX_POS[2], MAX_POS[2]);
+    }
 }
 
 YandyControlCmd YandyCommunicateNode::processKeyboardCmd(const VT03RemotePacket& remote)

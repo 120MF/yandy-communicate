@@ -6,6 +6,7 @@
 #include <YandySlavePacket.hpp>
 #include <zephyr/device.h>
 #include <memory>
+#include <array>
 
 using namespace OF;
 
@@ -70,7 +71,7 @@ private:
     bool key_event_processed = false;
     static constexpr int m_filter_threshold = 10;
 
-    static constexpr float POS_RATE = 0.002f;
+    static constexpr float POS_RATE = 0.001f;
     static constexpr float ANG_RATE = 0.002f;
     static constexpr std::array<float, 3> MAX_POS = {0.4f, 0.4f, 0.8f};
     static constexpr float MAX_ANG = 3.14159f;
@@ -78,6 +79,20 @@ private:
     // Low-pass filter coefficients
     static constexpr float ACCEL_ALPHA = 0.1f; // Accelerometer filter coefficient
     static constexpr float GYRO_ALPHA = 0.1f; // Gyroscope filter coefficient
+
+    struct HistoryFrame
+    {
+        float x, y, z;
+        float qw, qx, qy, qz;
+    };
+
+    static constexpr size_t HISTORY_SIZE = 1000; // ~4 seconds at 250Hz
+    std::array<HistoryFrame, HISTORY_SIZE> m_history_buffer;
+    size_t m_history_head = 0;
+    size_t m_recorded_count = 0;
+    int m_playback_cursor = -1;
+    float m_prev_wheel = 0.0f;
+
     YandySlavePacket m_packet{};
 
     // Filtered IMU data storage
